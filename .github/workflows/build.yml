@@ -1,0 +1,84 @@
+name: Mark57 spike (PySide6 to APK)
+on: [workflow_dispatch, push]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      QT_VER: "6.11.1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip wget cmake build-essential autoconf automake \
+            libtool pkg-config zlib1g-dev libncurses5-dev libffi-dev libssl-dev libltdl-dev
+
+      - name: Download Android SDK and NDK with the Qt helper
+        run: |
+          set -x
+          cd "$HOME"
+          git clone --depth 1 --branch "$QT_VER" https://code.qt.io/pyside/pyside-setup
+          python -m venv "$HOME/tools-venv"
+          . "$HOME/tools-venv/bin/activate"
+          cd pyside-setup
+          pip install -r requirements.txt
+          pip install -r tools/cross_compile_android/requirements.txt
+          python tools/cross_compile_android/main.py --download-only --auto-accept-license
+          ls -R "$HOME/.pyside6_android_deploy" | head -40
+
+      - name: Download official PySide6 Android wheels (aarch64)
+        run: |
+          mkdir -p "$HOME/wheels" && cd "$HOME/wheels"
+          B=https://download.qt.io/official_releases/QtForPython
+          wget -q "$B/pyside6/pyside6-$QT_VER-$QT_VER-cp311-cp311-android_aarch64.whl"
+          wget -q "$B/shiboken6/shiboken6-$QT_VER-$QT_VER-cp311-cp311-android_aarch64.whl"
+          ls -la
+
+      - name: Build APK (full log kept)
+        run: |
+          set +e
+          python -m venv "$HOME/build-venv"
+          . "$HOME/build-venv/bin/activate"
+          pip install "pyside6==$QT_VER" > pip.log 2>&1
+          NDK=$(ls -d "$HOME"/.pyside6_android_deploy/android-ndk/android-ndk-* | head -1)
+          pyside6-android-deploy \
+            --wheel-pyside="$HOME/wheels/pyside6-$QT_VER-$QT_VER-cp311-cp311-android_aarch64.whl" \
+            --wheel-shiboken="$HOME/wheels/shiboken6-$QT_VER-$QT_VER-cp311-cp311-android_aarch64.whl" \
+            --name=main --ndk-path "$NDK" \
+            --sdk-path "$HOME/.pyside6_android_deploy/android-sdk/" -f > build.log 2>&1
+          code=$?
+          echo "pyside6-android-deploy exit code: $code"
+          if [ $code -ne 0 ]; then echo "===== LAST 150 LINES ====="; tail -n 150 build.log; fi
+          exit $code
+
+      - name: Upload logs and generated specs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            build.log
+            pip.log
+            *.spec
+            buildozer.spec
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mark57-spike-APK
+          path: |
+            **/*.apk
+          if-no-files-found: warn
