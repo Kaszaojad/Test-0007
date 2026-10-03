@@ -1,23 +1,26 @@
 name: Mark57 spike (PySide6 to APK)
-on: [workflow_dispatch, push]
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  QT_VER: 6.11.1
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
-    env:
-      QT_VER: "6.11.1"
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: System packages
         run: |
@@ -25,7 +28,7 @@ jobs:
           sudo apt-get install -y git zip unzip wget cmake build-essential autoconf automake \
             libtool pkg-config zlib1g-dev libncurses5-dev libffi-dev libssl-dev libltdl-dev
 
-      - name: Download Android SDK and NDK with the Qt helper
+      - name: Download Android NDK and SDK
         run: |
           set -x
           cd "$HOME"
@@ -38,7 +41,7 @@ jobs:
           python tools/cross_compile_android/main.py --download-only --auto-accept-license
           ls -R "$HOME/.pyside6_android_deploy" | head -40
 
-      - name: Download official PySide6 Android wheels (aarch64)
+      - name: Download Android wheels
         run: |
           mkdir -p "$HOME/wheels" && cd "$HOME/wheels"
           B=https://download.qt.io/official_releases/QtForPython
@@ -52,6 +55,7 @@ jobs:
           python -m venv "$HOME/build-venv"
           . "$HOME/build-venv/bin/activate"
           pip install "pyside6==$QT_VER" > pip.log 2>&1
+          pip install jinja2 pkginfo tqdm "packaging==24.1" >> pip.log 2>&1
           NDK=$(ls -d "$HOME"/.pyside6_android_deploy/android-ndk/android-ndk-* | head -1)
           pyside6-android-deploy \
             --wheel-pyside="$HOME/wheels/pyside6-$QT_VER-$QT_VER-cp311-cp311-android_aarch64.whl" \
@@ -63,7 +67,7 @@ jobs:
           if [ $code -ne 0 ]; then echo "===== LAST 150 LINES ====="; tail -n 150 build.log; fi
           exit $code
 
-      - name: Upload logs and generated specs
+      - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -79,6 +83,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Mark57-spike-APK
-          path: |
-            **/*.apk
-          if-no-files-found: warn
+          path: "**/*.apk"
